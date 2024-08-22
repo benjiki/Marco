@@ -52,4 +52,55 @@ const login = catchAsync(async (req, res, next) => {
   const token = generateToken({ id: result.id });
   return res.status(200).json({ status: "success", token });
 });
-module.exports = { signup, login };
+
+const authentication = catchAsync(async (req, res, next) => {
+  // 1. Get the token from headers
+  let idToken = "";
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer")
+  ) {
+    idToken = req.headers.authorization.split(" ")[1];
+  }
+
+  if (!idToken) {
+    return next(
+      new AppError("You do not have permission to access this route", 401)
+    );
+  }
+
+  // 2. Verify the token
+  let tokenDetail;
+  try {
+    tokenDetail = jwt.verify(idToken, process.env.JWT_SECRET_KEY);
+  } catch (err) {
+    return next(new AppError("Invalid token. Please log in again!", 401));
+  }
+
+  // 3. Check if the token has not expired
+  if (tokenDetail.exp * 1000 < Date.now()) {
+    return next(new AppError("Your token has expired", 401));
+  }
+
+  // 4. Get the user details from the DB and add to req object
+  const freshUser = await user.findByPk(tokenDetail.id);
+  if (!freshUser) {
+    return next(new AppError("User no longer exists", 400));
+  }
+
+  req.user = freshUser;
+  return next();
+});
+const restrictTo = (...userType) => {
+  const checkPermission = (req, res, next) => {
+    if (!userType.includes(req.user.userType)) {
+      return next(
+        new AppError("You do not have permission to perform this action", 403)
+      );
+    }
+    return next();
+  };
+  return checkPermission;
+};
+
+module.exports = { signup, login, authentication, restrictTo };
